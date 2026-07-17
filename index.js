@@ -89,6 +89,63 @@ async function aggregate() {
   return out;
 }
 
+const trustCache = { at: 0, data: null };
+async function trust() {
+  if (trustCache.data && Date.now() - trustCache.at < 300000) return trustCache.data;
+  const out = { generated_at: new Date().toISOString(), boards: {} };
+  await Promise.allSettled([
+    (async function () {
+      const v = await fetchJson("https://api.bountybook.ai/jobs?status=verified&limit=50");
+      const jobs = v.jobs || [];
+      const confirmed = jobs.filter(function (j) { return j.payout_status === "confirmed"; });
+      const failed = jobs.filter(function (j) { return j.payout_status === "failed"; });
+      const newestVerified = jobs.reduce(function (m, j) { return Math.max(m, j.updated_at || 0); }, 0);
+      const lastConfirmed = confirmed.reduce(function (m, j) { return Math.max(m, j.updated_at || 0); }, 0);
+      const stats = await fetchJson("https://api.bountybook.ai/stats");
+      out.boards.bountybook = {
+        confirmed_payouts: confirmed.length, failed_payouts: failed.length,
+        payout_confirm_rate: (confirmed.length + failed.length) ? +(confirmed.length / (confirmed.length + failed.length)).toFixed(2) : null,
+        oracle_alive: Date.now() / 1000 - newestVerified < 3 * 3600,
+        newest_verified_at: newestVerified || null, last_confirmed_payout_at: lastConfirmed || null,
+        open_jobs: stats.openCount, total_paid_out_usd: stats.totalPaidOut,
+        note: "verification oracle inactive since 2026-06-29 at last audit; while down, submissions silently reset",
+      };
+    })(),
+    (async function () {
+      const list = await fetchJson("https://bounty.btnomb.com/api/bounties");
+      const funded = (list || []).filter(function (b) { return b.funded; });
+      out.boards.btnomb = {
+        listings: (list || []).length, funded_bounties: funded.length,
+        funded_value_usd: funded.reduce(function (s, b) { return s + (b.bountyUsd || 0); }, 0),
+        claimable_funded_now: funded.filter(function (b) { return b.claimable && !b.claimedBy; }).length,
+        note: "payout release controlled by board admin; 5% fee; $0.10 brief unlock refunded on acceptance",
+      };
+    })(),
+    (async function () {
+      const list = await fetchJson("https://api-market.daydreams.systems/api/tasks");
+      const tasks = list.tasks || [];
+      out.boards.taskmarket = {
+        recent_tasks: tasks.length,
+        accepted: tasks.filter(function (t) { return t.status === "accepted"; }).length,
+        open_now: tasks.filter(function (t) { return t.status === "open"; }).length,
+        newest_task_at: tasks.reduce(function (m, t) { return t.createdAt > m ? t.createdAt : m; }, ""),
+        note: "escrowed rewards on Base; 5% platform fee",
+      };
+    })(),
+    (async function () {
+      const c = await fetchJson("https://aiagentstore.ai/claw/tasks?state=available");
+      out.boards.clawearn = {
+        available_now: (c.items || []).length,
+        completed_alltime: c.counts ? c.counts.completed : null,
+        note: "contract-enforced escrow; worker stake required (30% first task, then 20%, then 10%); 48h auto-approve",
+      };
+    })(),
+  ]);
+  out.blacklist = [{ site: "agentbounty.org", reason: "static mock: expired deadlines listed as active, unverifiable payouts" }];
+  trustCache.at = Date.now(); trustCache.data = out;
+  return out;
+}
+
 app.get("/health", function (req, res) { res.json({ status: "ok", service: "agent-work-radar" }); });
 
 app.get("/llms.txt", function (req, res) {
@@ -129,6 +186,17 @@ app.use(paymentMiddleware({
       },
     })),
   },
+  "GET /api/trust": {
+    accepts: { scheme: "exact", price: "$0.01", network: NETWORK, payTo: PAY_TO },
+    description: "Reliability intelligence for agent work boards: on-chain-verified payout confirm rates, oracle liveness, stake requirements, activity recency, and a fake-board blacklist. Updated live, cached 5 min.",
+    mimeType: "application/json",
+    extensions: Object.assign({}, declareDiscoveryExtension({
+      output: {
+        example: { generated_at: "2026-07-18T00:00:00Z", boards: { bountybook: { payout_confirm_rate: 0.22, oracle_alive: false } }, blacklist: [{ site: "agentbounty.org" }] },
+        schema: { properties: { generated_at: { type: "string" }, boards: { type: "object" }, blacklist: { type: "array" } } },
+      },
+    })),
+  },
 }, server));
 
 app.get("/api/work", async function (req, res) {
@@ -136,6 +204,12 @@ app.get("/api/work", async function (req, res) {
   catch (e) { res.status(502).json({ error: String(e.message || e) }); }
 });
 
+
+app.get("/api/trust", async function (req, res) {
+  try { res.json(await trust()); }
+  catch (e) { res.status(502).json({ error: String(e.message || e) }); }
+});
 const port = process.env.PORT || 3000;
 app.listen(port, function () { console.log("agent-work-radar on :" + port + " paying to " + PAY_TO); });
+
 
