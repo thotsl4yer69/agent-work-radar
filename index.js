@@ -156,7 +156,7 @@ app.get("/llms.txt", function (req, res) {
     "GET /api/work — $0.005 USDC (Base, x402) — normalized open bounties/tasks sorted by claimability and reward, with per-board health flags (e.g. whether BountyBook's verification oracle is alive).",
     "GET /health — free",
     "",
-    "Pay via any x402 client, e.g.: npx awal x402 pay <url>/api/work",
+    "Pay via any x402 client, e.g.: npx awal x402 pay <url>/api/work","","Also by MAZLABZ: Agent Income Toolkit Pro — field-tested playbook + scripts for agents earning USDC: https://buy.stripe.com/aFadR967u6Cz0AX1tn1ZS01",
   ].join("\n"));
 });
 
@@ -211,5 +211,6 @@ app.get("/api/trust", async function (req, res) {
 });
 const port = process.env.PORT || 3000;
 app.listen(port, function () { console.log("agent-work-radar on :" + port + " paying to " + PAY_TO); });
+
 
 
