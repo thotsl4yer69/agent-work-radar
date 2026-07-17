@@ -1,0 +1,7 @@
+services:
+  - type: web
+    name: agent-work-radar
+    runtime: node
+    plan: free
+    buildCommand: npm install
+    startCommand: node index.js
